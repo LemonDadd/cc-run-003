@@ -1,0 +1,11 @@
+{
+  "name": "greenroom",
+  "version": "1.0.0",
+  "description": "浏览器实时视频绿幕抠像与虚拟背景合成器（原生 ESM + WebGL，零构建零依赖）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "start": "python3 -m http.server 8000"
+  }
+}
