@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>GreenRoom · 实时视频绿幕抠像与虚拟背景合成器</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <!-- ============ 顶部栏 ============ -->
+  <header id="topbar">
+    <div class="brand">🎬 GreenRoom <span>实时色度键合成</span></div>
+    <div class="top-actions">
+      <label class="btn">摄像头开/关
+        <input type="checkbox" id="camToggle" hidden />
+      </label>
+      <button class="btn" id="btnUploadVideo">上传视频</button>
+      <input type="file" id="fileVideo" accept="video/*" hidden />
+      <button class="btn" id="btnSwitchSource">切换视频源</button>
+      <span class="chip" id="chipSource">无视频源</span>
+      <span class="chip" id="chipResolution">— × —</span>
+      <span class="chip" id="chipFps">0 fps</span>
+      <span class="chip" id="chipColorSpace">色彩空间:—</span>
+    </div>
+  </header>
+
+  <!-- ============ 主体 ============ -->
+  <div id="main">
+    <!-- 左侧控制面板 -->
+    <aside id="panel">
+      <div class="panel-section">
+        <h3>播放控制</h3>
+        <div class="row">
+          <button class="btn sm" id="btnPlay">▶ 播放</button>
+          <button class="btn sm" id="btnPause">⏸ 暂停</button>
+          <button class="btn sm" id="btnStep">⏭ 逐帧</button>
+          <label class="btn sm"><input type="checkbox" id="chkLoop" checked hidden />🔁 循环</label>
+        </div>
+        <div class="status-line" id="statusLine">等待视频输入…</div>
+      </div>
+
+      <div class="panel-section">
+        <h3>色度键抠像</h3>
+        <div class="row">
+          <button class="btn sm" id="btnEyedropper">💧 吸管取色(点画面)</button>
+          <input type="color" id="keyColor" value="#00ff00" title="背景色" />
+        </div>
+        <div class="row">
+          <label>预设幕色</label>
+          <button class="btn xs" data-screen="green">绿幕</button>
+          <button class="btn xs" data-screen="blue">蓝幕</button>
+        </div>
+        <div class="row">
+          <label>色彩空间</label>
+          <select id="keyMode">
+            <option value="RGB">RGB 色度距离</option>
+            <option value="YUV" selected>YUV 色度平面</option>
+            <option value="HSV">HSV 色相</option>
+          </select>
+        </div>
+        <div class="slider-row"><label>相似度阈值 <span id="v_threshold"></span></label>
+          <input type="range" id="threshold" min="0" max="1" step="0.01" /></div>
+        <div class="slider-row"><label>平滑度 <span id="v_smoothness"></span></label>
+          <input type="range" id="smoothness" min="0.01" max="1" step="0.01" /></div>
+        <div class="slider-row"><label>边缘收缩 <span id="v_shrink"></span>px</label>
+          <input type="range" id="shrink" min="0" max="8" step="1" /></div>
+        <div class="slider-row"><label>边缘羽化 <span id="v_feather"></span>px</label>
+          <input type="range" id="feather" min="0" max="8" step="1" /></div>
+        <label class="check"><input type="checkbox" id="outputAlpha" />输出 alpha 遮罩(合成窗显示遮罩)</label>
+      </div>
+
+      <div class="panel-section">
+        <h3>遮罩后处理</h3>
+        <div class="slider-row"><label>腐蚀 <span id="v_erode"></span>次</label>
+          <input type="range" id="erode" min="0" max="4" step="1" /></div>
+        <div class="slider-row"><label>膨胀 <span id="v_dilate"></span>次</label>
+          <input type="range" id="dilate" min="0" max="4" step="1" /></div>
+        <div class="slider-row"><label>高斯模糊 <span id="v_blur"></span>次</label>
+          <input type="range" id="blur" min="0" max="4" step="1" /></div>
+        <div class="slider-row"><label>降噪强度 <span id="v_denoise"></span></label>
+          <input type="range" id="denoise" min="0" max="1" step="0.05" /></div>
+        <label class="check"><input type="checkbox" id="preserveSemi" checked />半透明区域保留</label>
+        <canvas id="histogram" width="256" height="56" title="遮罩 alpha 直方图"></canvas>
+      </div>
+
+      <div class="panel-section">
+        <h3>溢色抑制</h3>
+        <div class="row">
+          <label>类型</label>
+          <select id="spillChannel">
+            <option value="green" selected>绿色溢色</option>
+            <option value="blue">蓝色溢色</option>
+            <option value="none">关闭</option>
+          </select>
+        </div>
+        <div class="slider-row"><label>抑制强度 <span id="v_spillStrength"></span></label>
+          <input type="range" id="spillStrength" min="0" max="1" step="0.02" /></div>
+        <div class="slider-row"><label>边缘颜色校正 <span id="v_edgeColor"></span></label>
+          <input type="range" id="edgeColor" min="0" max="1" step="0.02" /></div>
+        <label class="check"><input type="checkbox" id="spillLink" checked />与前景调色联动</label>
+      </div>
+
+      <div class="panel-section">
+        <h3>背景合成</h3>
+        <div class="row wrap">
+          <button class="btn xs" data-bg="solid">纯色</button>
+          <button class="btn xs" data-bg="image">图片</button>
+          <button class="btn xs" data-bg="video">视频</button>
+          <button class="btn xs" data-bg="blur">原视频模糊</button>
+          <input type="color" id="bgColor" value="#224466" />
+          <input type="file" id="fileBgImage" accept="image/*" hidden />
+          <input type="file" id="fileBgVideo" accept="video/*" hidden />
+        </div>
+        <div class="slider-row"><label>背景缩放 <span id="v_bgScale"></span></label>
+          <input type="range" id="bgScale" min="0.5" max="2" step="0.01" /></div>
+        <div class="slider-row"><label>水平位移 <span id="v_bgOffsetX"></span></label>
+          <input type="range" id="bgOffsetX" min="-1" max="1" step="0.01" /></div>
+        <div class="slider-row"><label>垂直位移 <span id="v_bgOffsetY"></span></label>
+          <input type="range" id="bgOffsetY" min="-1" max="1" step="0.01" /></div>
+        <label class="check"><input type="checkbox" id="bgLoop" checked />视频背景循环</label>
+        <label class="check"><input type="checkbox" id="colorMatch" />前景/背景基础色彩匹配</label>
+      </div>
+
+      <div class="panel-section">
+        <h3>前景调色</h3>
+        <div class="slider-row"><label>亮度 <span id="v_brightness"></span></label>
+          <input type="range" id="brightness" min="-0.5" max="0.5" step="0.01" /></div>
+        <div class="slider-row"><label>对比度 <span id="v_contrast"></span></label>
+          <input type="range" id="contrast" min="-0.8" max="0.8" step="0.01" /></div>
+        <div class="slider-row"><label>饱和度 <span id="v_saturation"></span></label>
+          <input type="range" id="saturation" min="0" max="2" step="0.01" /></div>
+        <div class="slider-row"><label>色温 <span id="v_temperature"></span></label>
+          <input type="range" id="temperature" min="-1" max="1" step="0.02" /></div>
+        <div class="slider-row"><label>色调 <span id="v_tint"></span></label>
+          <input type="range" id="tint" min="-1" max="1" step="0.02" /></div>
+        <div class="slider-row"><label>曲线(gamma) <span id="v_curve"></span></label>
+          <input type="range" id="curve" min="0.4" max="2" step="0.02" /></div>
+        <label class="check"><input type="checkbox" id="lightMatch" />前景/背景光照统一</label>
+      </div>
+
+      <div class="panel-section">
+        <h3>质量</h3>
+        <div class="row">
+          <label>降采样</label>
+          <select id="downscale">
+            <option value="1">原始 1.0×</option>
+            <option value="0.75">0.75×</option>
+            <option value="0.5" selected>0.5×</option>
+            <option value="0.33">1/3×</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="autoQuality" />动态质量调节(低于30fps自动降)</label>
+      </div>
+    </aside>
+
+    <!-- 中间预览区 -->
+    <section id="stage">
+      <div class="triple-wrap">
+        <canvas id="glCanvas"></canvas>
+        <canvas id="cpuCanvas" class="hidden"></canvas>
+        <div class="pane-label" id="lbl0">原始</div>
+        <div class="pane-label" id="lbl1">遮罩</div>
+        <div class="pane-label" id="lbl2">合成</div>
+        <div id="eyedropperHint" class="hidden">吸管模式：在任意画面上点击拾取背景色（再点此条取消）</div>
+      </div>
+
+      <div class="bottom-row">
+        <div class="compare-wrap">
+          <div class="sub-label" id="compareLabel">分屏对比（拖动分割线，双击切换对比方向，按住鼠标=放大镜）</div>
+          <canvas id="compareCanvas"></canvas>
+        </div>
+        <div class="zoom-wrap">
+          <div class="sub-label">放大镜（悬停对比画面）</div>
+          <canvas id="zoomCanvas" width="220" height="160"></canvas>
+        </div>
+      </div>
+
+      <div class="preview-actions">
+        <div class="btn-group">
+          <button class="btn sm" id="btnSplit">分屏方向</button>
+          <button class="btn sm" id="btnBeforeAfter">按住看原始效果</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 右侧：性能 + 预设 + 导出 -->
+    <aside id="rightbar">
+      <div class="panel-section">
+        <h3>实现切换</h3>
+        <div class="row">
+          <label class="btn sm"><input type="radio" name="engine" value="webgl" checked hidden />WebGL</label>
+          <label class="btn sm"><input type="radio" name="engine" value="cpu" hidden />CPU 回退</label>
+        </div>
+        <div id="perfPanel">
+          <div class="perf-row"><span>渲染分辨率</span><b id="pResolution">—</b></div>
+          <div class="perf-row"><span>帧率</span><b id="pFps">0 fps</b></div>
+          <div class="perf-row"><span>CPU 耗时</span><b id="pCpu">0.0 ms</b></div>
+          <div class="perf-row"><span>GPU 耗时</span><b id="pGpu">n/a</b></div>
+          <div class="perf-row"><span>丢帧</span><b id="pDropped">0</b></div>
+          <div class="perf-row"><span>Pass 数</span><b id="pPasses">0</b></div>
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>预设</h3>
+        <div class="row wrap">
+          <button class="btn xs" data-preset="green">内置:标准绿幕</button>
+          <button class="btn xs" data-preset="blue">内置:蓝幕</button>
+          <button class="btn xs" data-preset="lowlight">内置:低光照</button>
+        </div>
+        <div class="row">
+          <select id="savedPresets" class="grow"></select>
+          <button class="btn xs" id="btnLoadPreset">加载</button>
+          <button class="btn xs danger" id="btnDelPreset">删</button>
+        </div>
+        <div class="row">
+          <button class="btn sm grow" id="btnSavePreset">💾 保存当前为预设</button>
+        </div>
+        <div class="row">
+          <button class="btn sm" id="btnExportParams">导出参数JSON</button>
+          <button class="btn sm" id="btnImportParams">导入参数JSON</button>
+          <input type="file" id="fileParams" accept="application/json,.json" hidden />
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <h3>导出</h3>
+        <button class="btn sm full" id="btnExportMask">导出遮罩预览 PNG</button>
+        <button class="btn sm full" id="btnExportComposite">导出合成画面 PNG</button>
+        <button class="btn sm full" id="btnExportReport">导出对比信息 TXT</button>
+      </div>
+    </aside>
+  </div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
